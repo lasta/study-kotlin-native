@@ -293,7 +293,7 @@ docker exec -it $(docker ps | grep 'gradle-on-amazonlinux' | awk '{print $1}') /
 `docker run` でビルドまで行うことも可能ですが、下記コマンドではビルドのたびに LLVM をはじめとした Gradle プラグインおよび依存ライブラリの取得を行うため、非常に時間がかかるのでおすすめしません。
 
 ```sh
-docker run --memory=3g -v "$(pwd)":/root/faas -t gradle-on-amazonlinux2:1.0 /root/faas/gradlew -p /root/faas/ clean build
+docker run --memory=3g -v "$(pwd)":/root/work -t gradle-on-amazonlinux2:1.0 /root/work/gradlew -p /root/work/ clean build
 ```
 
 `BUILD SUCCESSFUL` と出力されれば成功です。
