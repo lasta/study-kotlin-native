@@ -1,7 +1,13 @@
-# Kotlin/Native on AWS Lambda その1 - 開発環境構築
+# Kotlin/Native on AWS Lambda その1 - Amazon Linux 2 上でビルド・実行
 
 ## TL;DR
-Kotlin/Native で書いたコードを Amazon Linux 2 上でビルド
+1. Kotlin/Native で書いたコードを Amazon Linux 2 上でビルド・実行する
+1. Kotlin/Native プロジェクトを作成
+1. ローカルでビルド・実行
+1. Docker で Amazon Linux 2 向けのバイナリを作成する環境を構築
+1. Amazon Linux 2 (Docker) 上でビルド・実行
+
+[ソースコード](https://github.com/lasta/study-kotlin-native)
 
 ## はじめに
 こんにちは。 [lasta][github-lasta] です。
@@ -24,8 +30,8 @@ GraalVM 向けはベータリリース段階であり、 Multiplatform 向け (J
 本記事は3部編成の1部目になります。
 
 * [Kotlin/Native on AWS Lambda その1 - 開発環境構築][study-faas-kotlin1] (本記事)
-* [Kotlin/Native on AWS Lambda その2 - カスタムランタイム][study-faas-kotlin2] (執筆中)
-* [Kotlin/Native on AWS Lambda その3 - 外部ライブラリ (Sentry) の導入][study-faas-kotlin3] (執筆中)
+* Kotlin/Native on AWS Lambda その2 - カスタムランタイム (執筆中)
+* Kotlin/Native on AWS Lambda その3 - 外部ライブラリ (Sentry) の導入 (執筆中)
 
 ## 本記事のゴール
 Kotlin/Native のコードを Amazon Linux 2 向けにネイティブビルドし、動作することを確認する
@@ -38,9 +44,11 @@ Kotlin/Native のコードを Amazon Linux 2 向けにネイティブビルド�
   * macOS Big Sur 11.0.1
 * :wrench: IntelliJ IDEA Ultimate 2020.3
   * Community 版でもおそらく可能 ([機能比較](https://www.jetbrains.com/idea/features/editions_comparison_matrix.html))
-* :wreanch: docker desktop 3.0.1
+* :wrench: docker desktop 3.0.1
 * Kotlin 1.4.20
   * [IntelliJ IDEA](https://plugins.jetbrains.com/plugin/6954-kotlin) および [Gradle](https://kotlinlang.org/docs/reference/using-gradle.html) が自動的に環境構築してくれるため、手動でのインストールは不要
+
+:wrench: は事前インストールが必要になります。
 
 ## プロジェクト作成
 IntelliJ IDEA を用いて作成します。
@@ -50,7 +58,7 @@ Gradle を利用するため、 `gradle init` で作成しても問題ありま�
 
 1. IntelliJ IDEA を起動
 2. "File" → "New" → "Project"
-3. "New Project" !["New Project"]( ./assets/new_project1.png )
+3. "New Project" ![new_project1.png](https://qiita-image-store.s3.ap-northeast-1.amazonaws.com/0/13008/867953e6-1a63-dba1-ab7a-bc1a40fb3021.png)
   1. "Kotlin" を選択
   2. "Name" を自由に指定
   3. "Location" を自由に指定
@@ -59,7 +67,7 @@ Gradle を利用するため、 `gradle init` で作成しても問題ありま�
   6. "Project SDK" として Java 8 以降の JDK を指定
   7. "Group ID", "Artifact ID", "Version" を自由に指定
   8. "Next"
-4. "New Project" !["New Project"]( ./assets/new_project2.png )
+4. "New Project" ![new_project2.png](https://qiita-image-store.s3.ap-northeast-1.amazonaws.com/0/13008/78141397-54ff-28f5-4d0e-68729119d902.png)
   1. "Template" の "None" を指定
   2. "Finish"
 
@@ -92,7 +100,7 @@ Gradle を利用するため、 `gradle init` で作成しても問題ありま�
 `src/nativeMain/kotlin/main.kt` を開き、 main 関数の左にある実行ボタンを押します。
 初回ビルド時は native 向け依存ライブラリ (LLVM等) をダウンロードするため、少し時間がかかります。
 
-![Hello, Kotlin/Native!]( ./assets/hello_kotlinnative.png )
+![hello_kotlinnative.png](https://qiita-image-store.s3.ap-northeast-1.amazonaws.com/0/13008/d7a7fcfc-0b0c-dc89-10fb-c2d910066bcc.png)
 
 ## マルチプラットフォームビルド
 [ローカルマシンのプラットフォームでビルドする][Hello Kotlin/Native using Gradle]ためにすべきことを確認するために、まずは `build.gradle.kts` を読み解いていきます。
@@ -125,8 +133,6 @@ kotlin {
         isMingwX64 -> mingwX64("native")
         else -> throw GradleException("Host OS is not supported in Kotlin/Native.")
     }
-
-    // 省略
 }
 ```
 
@@ -236,15 +242,88 @@ Hello, Kotlin/Native! in me.lasta.entrypoint
 Amazon Linux 2 上で動作させる準備を進めていきます。
 
 ### ビルド環境の準備
+Amazon Linux 2 上で Gradle build するための Docker image を作成します。
 
+```Dockerfile:Dockerfile
+FROM amazonlinux:2
+RUN yum -y install tar gcc gcc-c++ make ncurses-compat-libs
+RUN amazon-linux-extras enable corretto8 # ※
+RUN yum clean metadata
+# for gradle
+RUN yum -y install java-1.8.0-amazon-corretto-devel # ※
+RUN yum -y install install which zip unzip
+RUN curl -s http://get.sdkman.io | bash && \
+    bash ${HOME}/.sdkman/bin/sdkman-init.sh && \
+    source ${HOME}/.bashrc && \
+    sdk install gradle
+```
+
+※ IntelliJ IDEA でプロジェクトを作成する際に指定した JDK バージョンと Amazon Corretto のバージョンを合わせてください
+
+上記の Dockerfile を作成したら、下記コマンドで Docker image を作成します。
+
+```sh
+docker build -t gradle-on-amazonlinux2:1.0 .
+```
+
+下記の通り無事イメージが作成されれば OK です。
+
+```console
+$ docker image ls
+REPOSITORY               TAG       IMAGE ID       CREATED         SIZE
+gradle-on-amazonlinux2   1.0       3fe2426fd527   4 minutes ago   1.2GB
+amazonlinux              2         ba2cc467a2bc   4 months ago    163MB
+```
+
+#### Gradle build 時に 137 エラー (OOME) が発生した場合
+Docker for Mac はイメージが動作するためのメモリ領域をデフォルトで 2GB に制限していますが、 Kotlin/Native のコンパイルはそれよりも多くのメモリを消費することがあります。
+もし Gradle build 時に 137 エラーを吐いた場合は、 Out of memory error (OOME) が発生している可能性があります。
+下図のように設定変更することで、より多くのメモリを確保可能になります。
+
+![allocate-more-memory.png](https://qiita-image-store.s3.ap-northeast-1.amazonaws.com/0/13008/f093aa9a-4f02-dd90-eae5-aa5d8a999edb.png)
+
+### Amazon Linux 2 上でビルド
+```sh
+# イメージの起動 (初回のみ)
+docker run --memory=3g -v "$(pwd)":/root/work -itd gradle-on-amazonlinux2:1.0
+# ビルド
+docker exec -it $(docker ps | grep 'gradle-on-amazonlinux' | awk '{print $1}') /root/work/gradlew -p /root/work/ clean build
+```
+
+`docker run` でビルドまで行うことも可能ですが、下記コマンドではビルドのたびに LLVM をはじめとした Gradle プラグインおよび依存ライブラリの取得を行うため、非常に時間がかかるのでおすすめしません。
+
+```sh
+docker run --memory=3g -v "$(pwd)":/root/faas -t gradle-on-amazonlinux2:1.0 /root/faas/gradlew -p /root/faas/ clean build
+```
+
+`BUILD SUCCESSFUL` と出力されれば成功です。
+
+### Amazon Linux 2 上で動作確認
+```console
+$ docker exec -it $(docker ps | grep 'gradle-on-amazonlinux' | awk '{print $1}') /root/work/build/bin/native/me.lasta.entrypointReleaseExecutable/me.lasta.entrypoint.kexe
+Hello, Kotlin/Native! in me.lasta.entrypoint
+$ docker exec -it $(docker ps | grep 'gradle-on-amazonlinux' | awk '{print $1}') /root/work/build/bin/native/rootReleaseExecutable/root.kexe
+Hello, Kotlin/Native!
+```
+
+無事、ローカル実行時と同じ結果が出力されました。
 
 ## おわりに
+Kotlin/Native で実装したコードをローカルマシン上と Amazon Linux 2 上で実行できました。
+
+次回は本シリーズの本題である、 Amazon Lambda (SAM local) 上で Kotlin/Native で書いたコードを実行します。
+
 明日は [fisherman08](https://qiita.com/fisherman08) さんの [KotlinのSealed Classは良いよ、という話](https://qiita.com/fisherman08/items/0eb01ed2da6d543be4b0) です。
 
+[kotlin-1.4]: https://kotlinlang.org/docs/reference/whatsnew14.html
+[kotlinlang]: https://kotlinlang.org/
+[jetbrains]: https://www.jetbrains.com/
+[idea]: https://www.jetbrains.com/idea/
 [github-lasta]: https://github.com/lasta
 [Kotless]: https://github.com/JetBrains/kotless
 [Custom Runtime]: https://docs.aws.amazon.com/ja_jp/lambda/latest/dg/runtimes-custom.html
 [study-faas-kotlin1]: https://qiita.com/lasta/items/9169727d89829cf007c3
-[study-faas-kotlin2]: https://qiita.com/lasta/items/7f576fce42d753db21fb
-[study-faas-kotlin3]: https://qiita.com/lasta/items/237acde9aa54f2668717
 [Hello Kotlin/Native using Gradle]: https://kotlinlang.org/docs/tutorials/native/using-gradle.html
+[kotlinx.serialization GA]: https://blog.jetbrains.com/kotlin/2020/10/kotlinx-serialization-1-0-released/
+[AWSLambda]: https://aws.amazon.com/jp/lambda/
+[kotlin-event-14]: https://kotlinlang.org/lp/event-14/
